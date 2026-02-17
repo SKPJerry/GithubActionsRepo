@@ -5,10 +5,10 @@ on:
     inputs:
       run_id:
         description: "Port action run identifier"
-        required: true
+        required: false
       entity_data:
         description: "Entity payload as JSON string"
-        required: true
+        required: false
 
 jobs:
   run-port-action:
