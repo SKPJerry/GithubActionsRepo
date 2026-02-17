@@ -14,3 +14,13 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Run Port Action
+        uses: port-labs/port-github-action@v1
+        with:
+          operation: "PATCH_RUN"
+          runId: ${{ github.event.inputs.run_id }}
+          status: "IN_PROGRESS"
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
