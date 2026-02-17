@@ -1,20 +1,52 @@
-name: Port Action Workflow
+name: Port Self Service Execution
 
 on:
   workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Port action run identifier"
+        required: true
+      entity_data:
+        description: "Entity payload as JSON string"
+        required: true
 
 jobs:
-  port_job:
+  run-port-action:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Run Port Action
+    steps:
+      - uses: actions/checkout@v4
+
+      # (Optional) Log what we received — for debugging only
+      - name: Show inputs (debug)
+        run: |
+          echo "run_id=${{ inputs.run_id }}"
+          echo "entity_data=${{ inputs.entity_data }}"
+
+      # Mark run as IN_PROGRESS in Port
+      - name: Start Port run
         uses: port-labs/port-github-action@v1
         with:
           operation: "PATCH_RUN"
+          runId: ${{ inputs.run_id }}
           status: "IN_PROGRESS"
+        env:
+          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+
+      # Do your custom logic here (provision infra, scaffold repo, etc.)
+      - name: Parse entity data
+        run: |
+          echo '${{ inputs.entity_data }}' | jq .
+
+      # Mark run as SUCCESS (or set to FAILURE in a catch block)
+      - name: Complete Port run
+        if: ${{ success() }}
+        uses: port-labs/port-github-action@v1
+        with:
+          operation: "PATCH_RUN"
+          runId: ${{ inputs.run_id }}
+          status: "SUCCESS"
         env:
           PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
           PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
