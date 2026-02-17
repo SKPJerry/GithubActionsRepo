@@ -4,9 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       run_id:
-        required: true
-      entity:
-        required: true
+        required: false
 
 jobs:
   port_job:
