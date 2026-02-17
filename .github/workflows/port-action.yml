@@ -2,9 +2,6 @@ name: Port Action Workflow
 
 on:
   workflow_dispatch:
-    inputs:
-      run_id:
-        required: false
 
 jobs:
   port_job:
@@ -17,7 +14,6 @@ jobs:
         uses: port-labs/port-github-action@v1
         with:
           operation: "PATCH_RUN"
-          runId: ${{ github.event.inputs.run_id }}
           status: "IN_PROGRESS"
         env:
           PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
