@@ -49,6 +49,8 @@ jobs:
         if: success()
         uses: port-labs/port-github-action@v1
         with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           operation: PATCH_RUN
           runId: ${{ inputs.run_id }}
           status: SUCCESS
@@ -60,6 +62,8 @@ jobs:
         if: failure()
         uses: port-labs/port-github-action@v1
         with:
+          clientId: ${{ secrets.PORT_CLIENT_ID }}
+          clientSecret: ${{ secrets.PORT_CLIENT_SECRET }}
           operation: PATCH_RUN
           runId: ${{ inputs.run_id }}
           status: FAILURE
