@@ -1,0 +1,66 @@
+name: Create Repo from Port
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+      repo_name:
+        required: true
+      visibility:
+        required: true
+        default: "private"
+
+jobs:
+  create_job:
+    runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.ORG_ADMIN_TOKEN }}    # PAT with permission to create repos
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+
+    steps:
+      # 1️⃣ Create Repo
+      - name: Create Repository
+        id: create
+        run: |
+          if [ "${{ inputs.visibility }}" = "public" ]; then
+            PRIVATE_FLAG=false
+          else
+            PRIVATE_FLAG=true
+          fi
+
+          RESPONSE=$(curl -s -X POST https://api.github.com/user/repos \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"name\": \"${{ inputs.repo_name }}\", \"private\": $PRIVATE_FLAG}")
+
+          URL=$(echo "$RESPONSE" | grep -o '"html_url": *"[^"]*"' | cut -d '"' -f4)
+
+          if [ -z "$URL" ]; then
+            echo "Repository creation failed."
+            exit 1
+          fi
+
+          echo "repo_url=$URL" >> $GITHUB_OUTPUT
+
+      # 2️⃣ Success → Port
+      - name: Report SUCCESS
+        if: success()
+        uses: port-labs/port-github-action@v1
+        with:
+          operation: PATCH_RUN
+          runId: ${{ inputs.run_id }}
+          status: SUCCESS
+          link: ${{ steps.create.outputs.repo_url }}
+          message: "Created repository successfully."
+
+      # 3️⃣ Failure → Port
+      - name: Report FAILURE
+        if: failure()
+        uses: port-labs/port-github-action@v1
+        with:
+          operation: PATCH_RUN
+          runId: ${{ inputs.run_id }}
+          status: FAILURE
+          message: "Repository creation failed."
