@@ -1,90 +1,70 @@
-name: Port Self Service Execution
+name: Create Repository from Port
 
 on:
   workflow_dispatch:
     inputs:
-      repo_name:
-        description: "Repository name"
-        required: true
-        type: string
-      visibility:
-        description: "public"
-        required: true
-        type: boolean
       run_id:
-        description: "Port action run identifier"
-        required: false
+        required: true
+      repo_name:
+        required: true
+      visibility:
+        required: true
+        default: "private"
 
 jobs:
-  run-port-action:
+  create_repo_job:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
     env:
       PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
       PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
-      GH_PAT: ${{ secrets.ORG_ADMIN_TOKEN }} # PAT with permission to create repos
+      GH_PAT: ${{ secrets.ORG_ADMIN_TOKEN }}   # Must be a PAT with repo creation rights
 
     steps:
+
+      # 1️⃣ CREATE REPOSITORY
       - name: Create repository
-        id: create_repo
-        shell: bash
-        env:
-          REPO_NAME: ${{ inputs.repo_name }}
-          VISIBILITY: ${{ inputs.visibility }}
+        id: create
         run: |
-          set -euo pipefail
+          set -e
 
-          if [[ -z "${GH_PAT:-}" ]]; then
-            echo "Secret ORG_ADMIN_TOKEN is not set"
-            exit 1
+          # Map visibility to "private" boolean if creating under user
+          PRIVATE_FLAG="true"
+          if [ "${{ inputs.visibility }}" = "public" ]; then
+            PRIVATE_FLAG="false"
           fi
 
-          payload=$(jq -n \
-            --arg name "$REPO_NAME" \
-            --arg visibility "$VISIBILITY" \
-            '{
-              name: $name,
-              visibility: $visibility,
-              has_issues: true,
-              has_projects: false,
-              has_wiki: false,
-              auto_init: true
-            }')
-
-          resp=$(curl -sS -X POST "$url" \
-            -H "Authorization: Bearer ${GH_PAT}" \
+          RESPONSE=$(curl -s -X POST https://api.github.com/user/repos \
+            -H "Authorization: Bearer $GH_PAT" \
             -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            -d "$payload")
+            -d "{\"name\": \"${{ inputs.repo_name }}\", \"private\": $PRIVATE_FLAG, \"auto_init\": true}")
 
-          echo "$resp" | jq .
+          echo "$RESPONSE"
 
-          html_url=$(echo "$resp" | jq -r '.html_url // empty')
-          full_name=$(echo "$resp" | jq -r '.full_name // empty')
-          if [[ -z "$html_url" || -z "$full_name" ]]; then
-            echo "Repository creation failed"
+          URL=$(echo "$RESPONSE" | jq -r '.html_url // empty')
+          if [ -z "$URL" ]; then
+            echo "Repository creation failed."
             exit 1
           fi
 
-          echo "repo_html_url=$html_url" >> "$GITHUB_OUTPUT"
-          echo "repo_full_name=$full_name" >> "$GITHUB_OUTPUT"
+          echo "repo_url=$URL" >> $GITHUB_OUTPUT
 
-      - name: Complete Port run (success)
-        if: ${{ success() }}
+      # 2️⃣ REPORT SUCCESS TO PORT
+      - name: Report SUCCESS to Port
+        if: success()
         uses: port-labs/port-github-action@v1
         with:
           operation: PATCH_RUN
-          runId: ${{ inputs.run_id }}
           status: SUCCESS
-          link: ${{ steps.create_repo.outputs.repo_html_url }}
-          message: Created repository ${{ steps.create_repo.outputs.repo_full_name }}
+          runId: ${{ inputs.run_id }}
+          link: ${{ steps.create.outputs.repo_url }}
+          message: "Repository created: ${{ steps.create.outputs.repo_url }}"
 
-      - name: Complete Port run (failure)
-        if: ${{ failure() }}
+      # 3️⃣ REPORT FAILURE TO PORT
+      - name: Report FAILURE to Port
+        if: failure()
         uses: port-labs/port-github-action@v1
         with:
           operation: PATCH_RUN
-          runId: ${{ inputs.run_id }}
           status: FAILURE
-          message: "Repository creation failed. See workflow logs."
+          runId: ${{ inputs.run_id }}
+          message: "Repository creation failed. Check workflow logs."
