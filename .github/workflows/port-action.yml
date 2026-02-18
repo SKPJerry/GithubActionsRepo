@@ -26,39 +26,12 @@ jobs:
       GH_PAT: ${{ secrets.ORG_ADMIN_TOKEN }} # PAT with permission to create repos
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Start Port run
-        uses: port-labs/port-github-action@v1
-        with:
-          operation: PATCH_RUN
-          runId: ${{ inputs.run_id }}
-          status: IN_PROGRESS
-
-      - name: Parse inputs
-        id: parse
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo '${{ inputs.entity_data }}' | jq .
-
-          REPO_NAME=$(echo '${{ inputs.entity_data }}' | jq -r '.repo_name')
-          VISIBILITY=$(echo '${{ inputs.entity_data }}' | jq -r '.visibility')
-
-          if [[ -z "$REPO_NAME" || -z "$VISIBILITY" ]]; then
-            echo "repo_name and visibility are required"
-            exit 1
-          fi
-
-          echo "repo_name=$REPO_NAME" >> "$GITHUB_OUTPUT"
-          echo "visibility=$VISIBILITY" >> "$GITHUB_OUTPUT"
-
       - name: Create repository
         id: create_repo
         shell: bash
         env:
-          REPO_NAME: ${{ steps.parse.outputs.repo_name }}
-          VISIBILITY: ${{ steps.parse.outputs.visibility }}
+          REPO_NAME: ${{ inputs.repo_name }}
+          VISIBILITY: ${{ inputs.visibility }}
         run: |
           set -euo pipefail
 
