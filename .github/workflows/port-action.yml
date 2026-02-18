@@ -5,48 +5,137 @@ on:
     inputs:
       run_id:
         description: "Port action run identifier"
-        required: false
+        required: true
       entity_data:
         description: "Entity payload as JSON string"
-        required: false
+        required: true
 
 jobs:
   run-port-action:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
+      PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+      GH_PAT: ${{ secrets.ORG_ADMIN_TOKEN }} # PAT with permission to create repos
 
     steps:
       - uses: actions/checkout@v4
 
-      # (Optional) Log what we received — for debugging only
-      - name: Show inputs (debug)
-        run: |
-          echo "run_id=${{ inputs.run_id }}"
-          echo "entity_data=${{ inputs.entity_data }}"
-
-      # Mark run as IN_PROGRESS in Port
       - name: Start Port run
         uses: port-labs/port-github-action@v1
         with:
-          operation: "PATCH_RUN"
+          operation: PATCH_RUN
           runId: ${{ inputs.run_id }}
-          status: "IN_PROGRESS"
-        env:
-          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+          status: IN_PROGRESS
 
-      # Do your custom logic here (provision infra, scaffold repo, etc.)
-      - name: Parse entity data
+      - name: Parse inputs
+        id: parse
+        shell: bash
         run: |
+          set -euo pipefail
           echo '${{ inputs.entity_data }}' | jq .
 
-      # Mark run as SUCCESS (or set to FAILURE in a catch block)
-      - name: Complete Port run
+          REPO_NAME=$(echo '${{ inputs.entity_data }}' | jq -r '.repo_name')
+          VISIBILITY=$(echo '${{ inputs.entity_data }}' | jq -r '.visibility')
+          DESCRIPTION=$(echo '${{ inputs.entity_data }}' | jq -r '.description // ""')
+          OWNER_ORG=$(echo '${{ inputs.entity_data }}' | jq -r '.owner_org // ""')
+          TEAM_SLUG=$(echo '${{ inputs.entity_data }}' | jq -r '.team_slug // ""')
+
+          if [[ -z "$REPO_NAME" || -z "$VISIBILITY" ]]; then
+            echo "repo_name and visibility are required"
+            exit 1
+          fi
+
+          echo "repo_name=$REPO_NAME" >> "$GITHUB_OUTPUT"
+          echo "visibility=$VISIBILITY" >> "$GITHUB_OUTPUT"
+          echo "description=$DESCRIPTION" >> "$GITHUB_OUTPUT"
+          echo "owner_org=$OWNER_ORG" >> "$GITHUB_OUTPUT"
+          echo "team_slug=$TEAM_SLUG" >> "$GITHUB_OUTPUT"
+
+      - name: Create repository
+        id: create_repo
+        shell: bash
+        env:
+          REPO_NAME: ${{ steps.parse.outputs.repo_name }}
+          VISIBILITY: ${{ steps.parse.outputs.visibility }}
+          DESCRIPTION: ${{ steps.parse.outputs.description }}
+          OWNER_ORG: ${{ steps.parse.outputs.owner_org }}
+          TEAM_SLUG: ${{ steps.parse.outputs.team_slug }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${GH_PAT:-}" ]]; then
+            echo "Secret ORG_ADMIN_TOKEN is not set"
+            exit 1
+          fi
+
+          payload=$(jq -n \
+            --arg name "$REPO_NAME" \
+            --arg description "$DESCRIPTION" \
+            --arg visibility "$VISIBILITY" \
+            '{
+              name: $name,
+              description: $description,
+              visibility: $visibility,
+              has_issues: true,
+              has_projects: false,
+              has_wiki: false,
+              auto_init: true
+            }')
+
+          if [[ -n "$OWNER_ORG" ]]; then
+            echo "Creating org repo: $OWNER_ORG/$REPO_NAME"
+            url="https://api.github.com/orgs/${OWNER_ORG}/repos"
+          else
+            echo "Creating user repo: $REPO_NAME"
+            url="https://api.github.com/user/repos"
+          fi
+
+          resp=$(curl -sS -X POST "$url" \
+            -H "Authorization: Bearer ${GH_PAT}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "$payload")
+
+          echo "$resp" | jq .
+
+          html_url=$(echo "$resp" | jq -r '.html_url // empty')
+          full_name=$(echo "$resp" | jq -r '.full_name // empty')
+          if [[ -z "$html_url" || -z "$full_name" ]]; then
+            echo "Repository creation failed"
+            exit 1
+          fi
+
+          echo "repo_html_url=$html_url" >> "$GITHUB_OUTPUT"
+          echo "repo_full_name=$full_name" >> "$GITHUB_OUTPUT"
+
+          if [[ -n "$TEAM_SLUG" && -n "$OWNER_ORG" ]]; then
+            echo "Adding team $TEAM_SLUG as admin to $full_name"
+            curl -sS -X PUT \
+              "https://api.github.com/orgs/${OWNER_ORG}/teams/${TEAM_SLUG}/repos/${full_name}" \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d '{"permission":"admin"}' | jq .
+          fi
+
+      - name: Complete Port run (success)
         if: ${{ success() }}
         uses: port-labs/port-github-action@v1
         with:
-          operation: "PATCH_RUN"
+          operation: PATCH_RUN
           runId: ${{ inputs.run_id }}
-          status: "SUCCESS"
-        env:
-          PORT_CLIENT_ID: ${{ secrets.PORT_CLIENT_ID }}
-          PORT_CLIENT_SECRET: ${{ secrets.PORT_CLIENT_SECRET }}
+          status: SUCCESS
+          link: ${{ steps.create_repo.outputs.repo_html_url }}
+          message: Created repository ${{ steps.create_repo.outputs.repo_full_name }}
+
+      - name: Complete Port run (failure)
+        if: ${{ failure() }}
+        uses: port-labs/port-github-action@v1
+        with:
+          operation: PATCH_RUN
+          runId: ${{ inputs.run_id }}
+          status: FAILURE
+          message: "Repository creation failed. See workflow logs."
