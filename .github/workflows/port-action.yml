@@ -1,4 +1,4 @@
-name: Create Repo from Port
+name: Create Repo from Port action
 
 on:
   workflow_dispatch:
